@@ -103,7 +103,14 @@ case "$VIRT" in
   ""|none) ok "运行在物理机上" ;;
   docker|podman|lxc|lxc-libvirt|systemd-nspawn|container-other|wsl)
     [ "$IS_WSL" -eq 0 ] && warn "本机是容器环境 ($VIRT)，通常拿不到 /dev/kvm，也不方便再跑 Docker" ;;
-  *) warn "本机本身是虚拟机 ($VIRT)：需要宿主开启嵌套虚拟化，下面 KVM 一项会体现出来" ;;
+  *)
+    warn "本机本身是虚拟机 ($VIRT)：需要宿主开启嵌套虚拟化，下面 KVM 一项会体现出来"
+    grep -qw hypervisor /proc/cpuinfo 2>/dev/null && info "依据: /proc/cpuinfo 带有 hypervisor 标志（由虚拟机管理程序设置）"
+    HV=$(lscpu 2>/dev/null | awk -F: '/Hypervisor vendor/ {gsub(/^[ \t]+/, "", $2); print $2}')
+    [ -n "$HV" ] && info "依据: lscpu 显示 Hypervisor vendor = $HV"
+    DMI="$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null) $(cat /sys/class/dmi/id/product_name 2>/dev/null)"
+    [ -n "${DMI// /}" ] && info "依据: 整机厂商/型号 (DMI) = $DMI"
+    ;;
 esac
 
 # ---------------------------------------------------------------------------
