@@ -1,0 +1,1103 @@
+<title>Linux 图形栈图解</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700;900&display=swap">
+<style>
+/* Layout: 单列长文 + 宽幅示意图；概念区用"名称栏 | 正文栏"两列，手机上堆叠。
+   示意图配色即分层编码：应用=蓝，X/显示服务器=琥珀，窗口管理/合成=紫，驱动=青，内核=石板灰，硬件=玫瑰 */
+:root {
+  --bg: #EDF0F4;
+  --surface: #FFFFFF;
+  --ink: #17202C;
+  --ink-2: #3B4656;
+  --muted: #5D6877;
+  --line: #CDD4DE;
+  --band: #E3E8EF;
+  --accent: #2A52D0;
+  --accent-soft: #E1E8FC;
+  --in: #C05A12;
+
+  --app-f: #DCE6FF; --app-s: #2A52D0;
+  --x-f: #FFEACB;   --x-s: #A86400;
+  --wm-f: #EBE1FC;  --wm-s: #6A3EC2;
+  --drv-f: #D5F0EA; --drv-s: #0C7A68;
+  --k-f: #E0E4EA;   --k-s: #4A5564;
+  --hw-f: #F7DFE2;  --hw-s: #AE3647;
+
+  --code-bg: #1C2533;
+  --code-fg: #E4EAF2;
+  --code-dim: #8D9AAE;
+
+  --f-display: "IBM Plex Sans Condensed", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --f-body: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11161E; --surface: #19202B; --ink: #E6EBF2; --ink-2: #B9C3D1; --muted: #8E9AAB;
+    --line: #2C3644; --band: #161C26; --accent: #7F9DFF; --accent-soft: #1F2A4A; --in: #F0995A;
+    --app-f: #1D2A4D; --app-s: #7F9DFF;
+    --x-f: #3A2C14;   --x-s: #E9AE52;
+    --wm-f: #2E2346;  --wm-s: #B595F5;
+    --drv-f: #123631; --drv-s: #4FCDB5;
+    --k-f: #252D39;   --k-s: #9AA6B6;
+    --hw-f: #3C1E25;  --hw-s: #EE8492;
+    --code-bg: #0B0F15; --code-fg: #E4EAF2; --code-dim: #7D8A9E;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11161E; --surface: #19202B; --ink: #E6EBF2; --ink-2: #B9C3D1; --muted: #8E9AAB;
+  --line: #2C3644; --band: #161C26; --accent: #7F9DFF; --accent-soft: #1F2A4A; --in: #F0995A;
+  --app-f: #1D2A4D; --app-s: #7F9DFF;
+  --x-f: #3A2C14;   --x-s: #E9AE52;
+  --wm-f: #2E2346;  --wm-s: #B595F5;
+  --drv-f: #123631; --drv-s: #4FCDB5;
+  --k-f: #252D39;   --k-s: #9AA6B6;
+  --hw-f: #3C1E25;  --hw-s: #EE8492;
+  --code-bg: #0B0F15; --code-fg: #E4EAF2; --code-dim: #7D8A9E;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 16px;
+  line-height: 1.75;
+  padding-inline: 16px;
+  padding-block: 0 64px;
+}
+.wrap { max-width: 1040px; margin: 0 auto; }
+.prose { max-width: 42em; }
+
+/* ---------- header ---------- */
+header.top {
+  padding-block: 56px 32px;
+  display: grid;
+  gap: 18px;
+}
+.eyebrow {
+  font-family: var(--f-display);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+h1 {
+  font-family: var(--f-body);
+  font-weight: 900;
+  font-size: clamp(34px, 6vw, 56px);
+  line-height: 1.12;
+  margin: 0;
+  letter-spacing: -.01em;
+  text-wrap: balance;
+}
+h1 .stack {
+  display: inline-block;
+  font-family: var(--f-mono);
+  font-weight: 500;
+  font-size: .42em;
+  vertical-align: middle;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  padding: 2px 10px;
+  border-radius: 4px;
+  margin-left: .3em;
+  letter-spacing: 0;
+}
+.lede { font-size: 18px; color: var(--ink-2); margin: 0; max-width: 40em; }
+
+.analogy {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.analogy div {
+  background: var(--surface);
+  padding: 12px 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  min-width: 0;
+}
+.analogy b { display: block; font-size: 15px; }
+.analogy span { color: var(--muted); }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: 1px; border: 1.5px solid; }
+.sw.app { background: var(--app-f); border-color: var(--app-s); }
+.sw.x { background: var(--x-f); border-color: var(--x-s); }
+.sw.wm { background: var(--wm-f); border-color: var(--wm-s); }
+.sw.drv { background: var(--drv-f); border-color: var(--drv-s); }
+.sw.k { background: var(--k-f); border-color: var(--k-s); }
+.sw.hw { background: var(--hw-f); border-color: var(--hw-s); }
+.sw.vir { background: transparent; border-color: var(--muted); border-style: dashed; }
+.sw.vnc { background: var(--accent-soft); border-color: var(--accent); }
+
+nav.toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-block: 8px 8px;
+}
+nav.toc a {
+  font-size: 14px;
+  color: var(--ink-2);
+  text-decoration: none;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  padding: 4px 12px;
+  border-radius: 999px;
+}
+nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- sections ---------- */
+section { padding-block: 48px 8px; }
+section > h2 {
+  font-weight: 900;
+  font-size: clamp(24px, 3.4vw, 32px);
+  line-height: 1.25;
+  margin: 6px 0 14px;
+  text-wrap: balance;
+}
+h3 { font-size: 20px; font-weight: 700; margin: 0 0 6px; line-height: 1.35; }
+p { margin: 0 0 14px; }
+code, .mono { font-family: var(--f-mono); font-size: .88em; }
+p code, li code, td code {
+  background: var(--band);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 4px;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- figures ---------- */
+figure.fig {
+  margin: 20px 0 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+}
+.fig-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.fig svg { display: block; width: 100%; min-width: 720px; height: auto; }
+figcaption {
+  font-size: 14px;
+  color: var(--muted);
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  align-items: center;
+}
+figcaption .key { white-space: nowrap; }
+.line-key { display: inline-block; width: 26px; height: 0; vertical-align: 4px; margin-right: 6px; border-top: 2px solid var(--ink-2); }
+.line-key.in { border-top: 2px dashed var(--in); }
+
+svg text { font-family: var(--f-body); fill: var(--ink); }
+svg .t { font-size: 15px; font-weight: 700; }
+svg .s { font-size: 12px; fill: var(--muted); }
+svg .m { font-family: var(--f-mono); font-size: 11.5px; fill: var(--muted); }
+svg .lbl { font-size: 12.5px; fill: var(--ink-2); }
+svg .lbl-in { font-size: 12.5px; fill: var(--in); }
+svg .band-t { font-size: 13px; font-weight: 700; fill: var(--muted); }
+svg .band { fill: var(--band); }
+svg .chip-t { font-size: 12.5px; font-weight: 500; }
+svg .title { font-size: 16px; font-weight: 900; }
+
+.b-app { fill: var(--app-f); stroke: var(--app-s); stroke-width: 1.5; }
+.b-x { fill: var(--x-f); stroke: var(--x-s); stroke-width: 1.5; }
+.b-wm { fill: var(--wm-f); stroke: var(--wm-s); stroke-width: 1.5; }
+.b-drv { fill: var(--drv-f); stroke: var(--drv-s); stroke-width: 1.5; }
+.b-k { fill: var(--k-f); stroke: var(--k-s); stroke-width: 1.5; }
+.b-hw { fill: var(--hw-f); stroke: var(--hw-s); stroke-width: 1.5; }
+.b-vnc { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+.b-vir { fill: none; stroke: var(--muted); stroke-width: 1.3; stroke-dasharray: 6 5; }
+.b-chip { fill: var(--surface); stroke: var(--line); stroke-width: 1; }
+.hw-stand { fill: var(--hw-s); }
+
+.ar { stroke: var(--ink-2); stroke-width: 1.7; fill: none; }
+.ar.in { stroke: var(--in); stroke-dasharray: 6 4; }
+.ar.acc { stroke: var(--accent); stroke-width: 2; }
+.mk { fill: var(--ink-2); }
+.mk-in { fill: var(--in); }
+.mk-acc { fill: var(--accent); }
+.divider { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 4; }
+.num-c { fill: var(--surface); stroke: var(--accent); stroke-width: 1.8; }
+.num-t { font-family: var(--f-mono); font-size: 12px; font-weight: 500; fill: var(--accent); }
+
+/* ---------- concept rows ---------- */
+.concepts { display: grid; gap: 16px; margin-top: 20px; }
+.concept {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 8px 32px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 24px;
+}
+.concept .head { min-width: 0; }
+.concept .layer {
+  font-family: var(--f-display);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.concept h3 { font-size: 24px; font-weight: 900; margin: 6px 0 2px; }
+.concept .en { font-family: var(--f-mono); font-size: 13px; color: var(--muted); }
+.concept .one {
+  margin-top: 12px;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--ink-2);
+  border-left: 3px solid var(--line);
+  padding-left: 12px;
+}
+.concept .body { min-width: 0; }
+.concept ul { margin: 0 0 12px; padding-left: 1.2em; }
+.concept li { margin-bottom: 6px; }
+.concept li::marker { color: var(--muted); }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
+.tags span {
+  font-family: var(--f-mono);
+  font-size: 12.5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 8px;
+  color: var(--ink-2);
+  background: var(--bg);
+}
+.check {
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+}
+.check code { font-size: 12.5px; }
+.sub { font-weight: 700; margin: 10px 0 4px; font-size: 15px; }
+
+/* ---------- journey ---------- */
+ol.journey {
+  list-style: none;
+  margin: 20px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+  counter-reset: step;
+  position: relative;
+}
+ol.journey li {
+  counter-increment: step;
+  display: grid;
+  grid-template-columns: 44px 120px minmax(0, 1fr);
+  gap: 4px 16px;
+  align-items: start;
+  padding-block: 12px;
+  border-top: 1px solid var(--line);
+}
+ol.journey li:last-child { border-bottom: 1px solid var(--line); }
+ol.journey li::before {
+  content: counter(step, decimal-leading-zero);
+  font-family: var(--f-mono);
+  font-weight: 500;
+  color: var(--accent);
+  font-size: 15px;
+  padding-top: 2px;
+}
+.who {
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 2px 8px;
+  border: 1.5px solid;
+  justify-self: start;
+  white-space: nowrap;
+}
+.who.app { background: var(--app-f); border-color: var(--app-s); }
+.who.x { background: var(--x-f); border-color: var(--x-s); }
+.who.wm { background: var(--wm-f); border-color: var(--wm-s); }
+.who.drv { background: var(--drv-f); border-color: var(--drv-s); }
+.who.k { background: var(--k-f); border-color: var(--k-s); }
+.who.hw { background: var(--hw-f); border-color: var(--hw-s); }
+ol.journey p { margin: 0; min-width: 0; }
+
+/* ---------- tables ---------- */
+.table-scroll { overflow-x: auto; margin: 16px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 680px; font-size: 14.5px; line-height: 1.6; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+thead th {
+  font-family: var(--f-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  color: var(--muted);
+  background: var(--band);
+}
+tbody tr:last-child td, tbody tr:last-child th { border-bottom: 0; }
+tbody th { font-weight: 700; white-space: nowrap; }
+td.yes { color: var(--drv-s); font-weight: 500; }
+td.no { color: var(--muted); }
+
+/* ---------- callouts ---------- */
+.callout {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin: 20px 0;
+  font-size: 15px;
+}
+.callout b { color: var(--accent); }
+.callout p:last-child { margin-bottom: 0; }
+
+.two {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px 20px;
+  min-width: 0;
+}
+.panel h3 { font-size: 17px; }
+.panel ol, .panel ul { margin: 0; padding-left: 1.4em; font-size: 15px; }
+.panel li { margin-bottom: 6px; }
+.panel li::marker { color: var(--accent); font-family: var(--f-mono); font-weight: 500; }
+
+.points { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; margin-top: 16px; }
+.point { min-width: 0; border-top: 2px solid var(--wm-s); padding-top: 10px; }
+.point h3 { font-size: 17px; }
+.point p { font-size: 15px; color: var(--ink-2); margin: 0; }
+
+/* ---------- code ---------- */
+pre.code {
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-family: var(--f-mono);
+  font-size: 13.5px;
+  line-height: 1.7;
+  border-radius: 8px;
+  padding: 18px 20px;
+  overflow-x: auto;
+  margin: 16px 0;
+}
+pre.code .c { color: var(--code-dim); }
+
+/* ---------- myths ---------- */
+dl.myths { display: grid; gap: 0; margin: 16px 0 0; }
+dl.myths div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 4px 24px; padding-block: 14px; border-top: 1px solid var(--line); }
+dl.myths div:last-child { border-bottom: 1px solid var(--line); }
+dl.myths dt { font-weight: 700; text-decoration: line-through; text-decoration-color: var(--hw-s); text-decoration-thickness: 2px; }
+dl.myths dd { margin: 0; color: var(--ink-2); font-size: 15px; }
+
+footer { margin-top: 56px; font-size: 13px; color: var(--muted); }
+
+@media (max-width: 760px) {
+  .concept { grid-template-columns: minmax(0, 1fr); padding: 18px; }
+  ol.journey li { grid-template-columns: 34px minmax(0, 1fr); }
+  ol.journey li p { grid-column: 2; }
+  dl.myths div { grid-template-columns: minmax(0, 1fr); }
+  header.top { padding-block: 32px 20px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <div class="eyebrow">Linux Graphics Stack · 从像素到窗口</div>
+  <h1>Linux 图形栈图解 <span class="stack">X11 / Wayland</span></h1>
+  <p class="lede">屏幕上一个窗口的背后，有硬件、内核、显示服务器、窗口管理器和应用程序五层在协作。这页从下往上把每个角色讲清楚，再看虚拟显示和 VNC 怎么"偷梁换柱"，最后对比 Wayland 换掉了什么。</p>
+  <div class="analogy" aria-label="一句话类比">
+    <div><b><i class="sw hw"></i>显示器</b><span>剧院的舞台，只负责被照亮</span></div>
+    <div><b><i class="sw drv"></i>显卡 + 驱动</b><span>灯光音响设备和操作手册</span></div>
+    <div><b><i class="sw x"></i>X Server</b><span>舞台监督，掌管舞台和传话</span></div>
+    <div><b><i class="sw wm"></i>窗口管理器</b><span>布景师，决定谁站哪、谁在前</span></div>
+    <div><b><i class="sw app"></i>GUI 应用</b><span>演员，各自演好自己的戏</span></div>
+    <div><b><i class="sw vir"></i>虚拟显示</b><span>没有观众席的排练厅</span></div>
+    <div><b><i class="sw vnc"></i>VNC</b><span>架在台下的直播摄像机加遥控器</span></div>
+    <div><b><i class="sw wm"></i>Wayland 合成器</b><span>舞台监督和布景师由一人包办</span></div>
+  </div>
+  <nav class="toc" aria-label="目录">
+    <a href="#overview">全景图</a>
+    <a href="#concepts">七个概念</a>
+    <a href="#journey">一次按键的旅程</a>
+    <a href="#remote">虚拟显示与 VNC</a>
+    <a href="#wayland">Wayland</a>
+    <a href="#commands">动手查看</a>
+    <a href="#myths">常见误区</a>
+  </nav>
+</header>
+
+<!-- ============ OVERVIEW ============ -->
+<section id="overview">
+  <div class="eyebrow">全景图</div>
+  <h2>X11 桌面的完整分层</h2>
+  <div class="prose">
+    <p>下面是一台普通 Linux 桌面（X11 会话）上各组件的位置。上半部分跑在用户空间，下半部分是内核和硬件。实线是画面往下走到显示器的路径，虚线是键盘鼠标事件往上走到应用的路径。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fig-scroll">
+    <svg viewBox="0 0 960 640" role="img" aria-label="X11 图形栈分层图：应用、窗口管理器经 X 协议连到 Xorg；Xorg 经 libinput 和 modesetting 模块连到内核 evdev 与 DRM/KMS；3D 游戏经 Mesa 直接渲染；DRM 驱动 GPU，GPU 经 HDMI/DP 输出到显示器">
+      <defs>
+        <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+        <marker id="a1i" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-in" d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+
+      <!-- bands -->
+      <rect class="band" x="0" y="22" width="960" height="108" rx="4"/>
+      <rect class="band" x="0" y="292" width="960" height="96" rx="4"/>
+      <rect class="band" x="0" y="512" width="960" height="118" rx="4"/>
+      <text class="band-t" x="16" y="82">X 客户端</text>
+      <text class="band-t" x="16" y="222">显示服务器</text>
+      <text class="band-t" x="16" y="338">驱动模块</text>
+      <text class="s" x="16" y="356">（用户态）</text>
+      <text class="band-t" x="16" y="462">内核</text>
+      <text class="band-t" x="16" y="576">硬件</text>
+
+      <!-- row 1: clients -->
+      <rect class="b-app" x="130" y="45" width="160" height="70" rx="6"/>
+      <text class="t" x="210" y="75" text-anchor="middle">浏览器</text>
+      <text class="s" x="210" y="97" text-anchor="middle">GTK · Firefox</text>
+
+      <rect class="b-app" x="305" y="45" width="160" height="70" rx="6"/>
+      <text class="t" x="385" y="75" text-anchor="middle">终端</text>
+      <text class="s" x="385" y="97" text-anchor="middle">Qt · Konsole</text>
+
+      <rect class="b-wm" x="480" y="45" width="180" height="70" rx="6"/>
+      <text class="t" x="570" y="75" text-anchor="middle">窗口管理器</text>
+      <text class="s" x="570" y="97" text-anchor="middle">i3 · Openbox · Mutter</text>
+
+      <rect class="b-app" x="720" y="45" width="220" height="70" rx="6"/>
+      <text class="t" x="830" y="75" text-anchor="middle">3D 游戏 / 视频</text>
+      <text class="s" x="830" y="97" text-anchor="middle">OpenGL · Vulkan</text>
+
+      <!-- row 2: Xorg -->
+      <rect class="b-x" x="130" y="175" width="530" height="95" rx="6"/>
+      <text class="t" x="146" y="199">X Server（Xorg）</text>
+      <text class="m" x="644" y="199" text-anchor="end">DISPLAY=:0</text>
+      <rect class="b-chip" x="146" y="213" width="150" height="40" rx="4"/>
+      <text class="chip-t" x="221" y="238" text-anchor="middle">窗口树 · 焦点</text>
+      <rect class="b-chip" x="306" y="213" width="150" height="40" rx="4"/>
+      <text class="chip-t" x="381" y="238" text-anchor="middle">事件分发 · 绘图</text>
+      <rect class="b-chip" x="466" y="213" width="178" height="40" rx="4"/>
+      <text class="chip-t" x="555" y="238" text-anchor="middle">RandR · Composite · DRI3</text>
+
+      <!-- row 3: modules / userspace drivers -->
+      <rect class="b-drv" x="130" y="310" width="250" height="62" rx="6"/>
+      <text class="t" x="255" y="335" text-anchor="middle">libinput 输入驱动</text>
+      <text class="s" x="255" y="357" text-anchor="middle">原始事件 → X 事件 · XKB 键盘布局</text>
+
+      <rect class="b-drv" x="400" y="310" width="260" height="62" rx="6"/>
+      <text class="t" x="530" y="335" text-anchor="middle">modesetting 显示驱动</text>
+      <text class="s" x="530" y="357" text-anchor="middle">经 KMS 设置画面 · glamor 加速</text>
+
+      <rect class="b-drv" x="720" y="310" width="220" height="62" rx="6"/>
+      <text class="t" x="830" y="335" text-anchor="middle">Mesa 用户态驱动</text>
+      <text class="s" x="830" y="357" text-anchor="middle">GL / Vulkan → GPU 命令</text>
+
+      <!-- user/kernel divider -->
+      <line class="divider" x1="120" y1="398" x2="960" y2="398"/>
+      <text class="s" x="944" y="391" text-anchor="end">用户空间 ↑</text>
+      <text class="s" x="944" y="414" text-anchor="end">内核空间 ↓</text>
+
+      <!-- row 4: kernel -->
+      <rect class="b-k" x="130" y="425" width="250" height="62" rx="6"/>
+      <text class="t" x="255" y="450" text-anchor="middle">evdev 输入子系统</text>
+      <text class="m" x="255" y="472" text-anchor="middle">/dev/input/event*</text>
+
+      <rect class="b-k" x="400" y="425" width="540" height="62" rx="6"/>
+      <text class="t" x="670" y="450" text-anchor="middle">DRM / KMS 显卡内核驱动</text>
+      <text class="m" x="670" y="472" text-anchor="middle">i915 · xe · amdgpu · nouveau · nvidia-drm  ─  /dev/dri/card0</text>
+
+      <!-- row 5: hardware -->
+      <rect class="b-hw" x="130" y="535" width="250" height="72" rx="6"/>
+      <text class="t" x="255" y="565" text-anchor="middle">键盘 · 鼠标 · 触摸板</text>
+      <text class="s" x="255" y="587" text-anchor="middle">USB / 蓝牙 HID</text>
+
+      <rect class="b-hw" x="400" y="535" width="260" height="72" rx="6"/>
+      <text class="t" x="530" y="565" text-anchor="middle">显卡 GPU</text>
+      <text class="s" x="530" y="587" text-anchor="middle">显存帧缓冲 → 显示引擎扫描输出</text>
+
+      <rect class="b-hw" x="760" y="533" width="180" height="62" rx="6"/>
+      <text class="t" x="850" y="560" text-anchor="middle">显示器</text>
+      <text class="s" x="850" y="580" text-anchor="middle">按刷新率点亮像素</text>
+      <rect class="hw-stand" x="838" y="595" width="24" height="10"/>
+      <rect class="hw-stand" x="815" y="605" width="70" height="4" rx="2"/>
+
+      <!-- arrows: clients <-> Xorg -->
+      <line class="ar" x1="210" y1="118" x2="210" y2="172" marker-start="url(#a1)" marker-end="url(#a1)"/>
+      <line class="ar" x1="385" y1="118" x2="385" y2="172" marker-start="url(#a1)" marker-end="url(#a1)"/>
+      <line class="ar" x1="570" y1="118" x2="570" y2="172" marker-start="url(#a1)" marker-end="url(#a1)"/>
+      <text class="lbl" x="222" y="150">请求 ↓ 事件 ↑</text>
+      <text class="lbl" x="397" y="150">X11 协议 · Unix socket</text>
+      <text class="lbl" x="582" y="150">拦截窗口请求</text>
+
+      <!-- game paths -->
+      <path class="ar" d="M760,118 V222 H663" marker-end="url(#a1)"/>
+      <text class="lbl" x="768" y="160">交出画好的帧</text>
+      <text class="lbl" x="768" y="177">(DRI3 / Present)</text>
+      <line class="ar" x1="890" y1="118" x2="890" y2="307" marker-end="url(#a1)"/>
+      <text class="lbl" x="882" y="268" text-anchor="end">直接渲染</text>
+
+      <!-- output path -->
+      <line class="ar" x1="530" y1="272" x2="530" y2="307" marker-end="url(#a1)"/>
+      <line class="ar" x1="662" y1="341" x2="717" y2="341" marker-end="url(#a1)"/>
+      <line class="ar" x1="530" y1="374" x2="530" y2="422" marker-end="url(#a1)"/>
+      <line class="ar" x1="830" y1="374" x2="830" y2="422" marker-end="url(#a1)"/>
+      <line class="ar" x1="530" y1="489" x2="530" y2="532" marker-end="url(#a1)"/>
+      <line class="ar" x1="662" y1="564" x2="757" y2="564" marker-end="url(#a1)"/>
+      <text class="lbl" x="709" y="555" text-anchor="middle">HDMI / DP</text>
+      <text class="s" x="709" y="584" text-anchor="middle">EDID 回报能力</text>
+
+      <!-- input path -->
+      <line class="ar in" x1="255" y1="533" x2="255" y2="492" marker-end="url(#a1i)"/>
+      <line class="ar in" x1="255" y1="423" x2="255" y2="377" marker-end="url(#a1i)"/>
+      <line class="ar in" x1="255" y1="308" x2="255" y2="275" marker-end="url(#a1i)"/>
+    </svg>
+    </div>
+    <figcaption>
+      <span class="key"><i class="sw app"></i>应用</span>
+      <span class="key"><i class="sw x"></i>显示服务器</span>
+      <span class="key"><i class="sw wm"></i>窗口管理</span>
+      <span class="key"><i class="sw drv"></i>用户态驱动</span>
+      <span class="key"><i class="sw k"></i>内核</span>
+      <span class="key"><i class="sw hw"></i>硬件</span>
+      <span class="key"><i class="line-key"></i>画面 / 请求</span>
+      <span class="key"><i class="line-key in"></i>输入事件</span>
+    </figcaption>
+  </figure>
+
+  <div class="callout">
+    <p><b>先抓住主干。</b>应用不直接碰显卡，也不直接碰显示器。它们要么把"开窗口、画东西"的请求交给 X Server，要么借 Mesa 自己用 GPU 画好再交给 X Server。X Server 通过内核里的 DRM/KMS 驱动指挥显卡，显卡再把显存里的那一帧图像持续送到显示器。</p>
+  </div>
+</section>
+
+<!-- ============ CONCEPTS ============ -->
+<section id="concepts">
+  <div class="eyebrow">七个概念</div>
+  <h2>从硬件往上，逐个拆开</h2>
+  <div class="prose"><p>顺序和全景图一致，从最底层的显示器讲到最上层的应用，最后是两个"拓展玩法"：虚拟显示和 VNC。</p></div>
+
+  <div class="concepts">
+
+    <!-- Monitor -->
+    <article class="concept" id="c-monitor">
+      <div class="head">
+        <div class="layer"><i class="sw hw"></i>硬件层</div>
+        <h3>显示器</h3>
+        <div class="en">Monitor / Display</div>
+        <p class="one">一块"哑"设备：只把收到的像素信号变成光，不知道什么是窗口，也不知道对面是 Linux。</p>
+      </div>
+      <div class="body">
+        <ul>
+          <li>通过 <b>HDMI、DisplayPort</b> 或笔记本内部的 <b>eDP</b> 接到显卡的输出口（内核里叫 connector）。</li>
+          <li>以固定的<b>刷新率</b>（60Hz、144Hz……）一帧一帧地接收完整画面。每一帧都是显卡从显存里读出来、按行扫描发送的。</li>
+          <li>插上时通过 <b>EDID</b> 数据告诉显卡：我叫什么、支持哪些分辨率和刷新率、物理尺寸多大。系统据此列出可选分辨率，并计算 DPI。</li>
+          <li>多显示器时，每块屏对应显卡上的一路输出。把它们拼成扩展桌面还是镜像，是上层（X 的 RandR 扩展或 Wayland 合成器）的决定。</li>
+        </ul>
+        <div class="check">查看：<code>xrandr</code> <code>cat /sys/class/drm/card*-*/status</code> <code>edid-decode</code></div>
+      </div>
+    </article>
+
+    <!-- GPU + driver -->
+    <article class="concept" id="c-driver">
+      <div class="head">
+        <div class="layer"><i class="sw drv"></i>驱动层</div>
+        <h3>显卡与显卡驱动</h3>
+        <div class="en">GPU · DRM/KMS · Mesa</div>
+        <p class="one">显卡负责存放画面、执行绘图运算、把画面送给显示器；驱动让 Linux 能指挥它。Linux 的显卡驱动分成内核和用户态两半。</p>
+      </div>
+      <div class="body">
+        <p class="sub">显卡（GPU）硬件里有三样关键的东西</p>
+        <ul>
+          <li><b>显存与帧缓冲（framebuffer）</b>：一块内存区域，存着"屏幕现在应该显示的像素"。集成显卡用的是系统内存的一部分。</li>
+          <li><b>显示引擎</b>：按显示器的刷新率不断读取帧缓冲，经 encoder 和 connector 发到线缆上，这叫扫描输出（scanout）。</li>
+          <li><b>渲染引擎</b>：成千上万个计算核心，执行 OpenGL/Vulkan 翻译过来的绘图命令，把结果写回显存。</li>
+        </ul>
+        <p class="sub">内核态驱动：DRM / KMS</p>
+        <ul>
+          <li><b>KMS（Kernel Mode Setting）</b> 设置分辨率、刷新率，决定"哪块 buffer 显示到哪个屏幕"，并在垂直同步时翻页（page flip）。</li>
+          <li><b>DRM（Direct Rendering Manager）</b> 管理显存 buffer、在多个程序间安全地共享 GPU、接收用户态提交的命令。</li>
+          <li>具体驱动模块：Intel 的 <code>i915</code>/<code>xe</code>、AMD 的 <code>amdgpu</code>、NVIDIA 开源的 <code>nouveau</code> 或官方的 <code>nvidia</code> + <code>nvidia-drm</code>。设备节点是 <code>/dev/dri/card0</code>（控制显示）和 <code>/dev/dri/renderD128</code>（只渲染）。</li>
+        </ul>
+        <p class="sub">用户态驱动：Mesa（或 NVIDIA 专有库）</p>
+        <ul>
+          <li>实现 OpenGL 和 Vulkan 这些 API，把应用的绘图调用翻译成某款 GPU 能懂的命令，再交给内核驱动。Mesa 里有 <code>iris</code>、<code>radeonsi</code>、<code>RADV</code>、<code>ANV</code>、<code>NVK</code> 等针对不同显卡的实现。</li>
+          <li>没有可用 GPU 时，Mesa 的 <code>llvmpipe</code> 用 CPU 软件模拟 OpenGL，很慢但能用，虚拟显示里常见。</li>
+        </ul>
+        <p class="sub">Xorg 自己的显示驱动（DDX）</p>
+        <ul>
+          <li>Xorg 还需要一个"把自己接到显卡上"的模块。现在绝大多数机器用通用的 <code>modesetting</code>：调用 KMS 设置画面，用 glamor（基于 OpenGL）加速 2D。老的 <code>xf86-video-intel</code> 等专用 DDX 已逐渐淘汰；NVIDIA 专有驱动则带自己的 <code>nvidia</code> DDX。</li>
+        </ul>
+        <div class="check">查看：<code>lspci -k | grep -A3 VGA</code> <code>glxinfo -B</code> <code>ls -l /dev/dri</code></div>
+      </div>
+    </article>
+
+    <!-- X Server -->
+    <article class="concept" id="c-xserver">
+      <div class="head">
+        <div class="layer"><i class="sw x"></i>显示服务器层</div>
+        <h3>X Server</h3>
+        <div class="en">X Window System · Xorg</div>
+        <p class="one">X11 体系的"显示总管"：独占屏幕和键鼠，所有图形程序都要连上它，才能开窗口、收输入。</p>
+      </div>
+      <div class="body">
+        <ul>
+          <li>X Window System 诞生于 1984 年的 MIT，协议第 11 版（X11）在 1987 年定型并沿用至今。Linux 上最常见的实现是 <b>Xorg</b>（X.Org Server）。</li>
+          <li>它是一个<b>服务器进程</b>，应用是<b>客户端</b>。客户端通过 Unix socket <code>/tmp/.X11-unix/X0</code>（或 TCP 端口 6000+N）连接，用环境变量 <code>DISPLAY=:0</code> 指定连哪一个 X Server。</li>
+          <li>维护一棵<b>窗口树</b>：每个窗口的位置、大小、层叠关系；根窗口就是整块屏幕。</li>
+          <li><b>分发输入</b>：根据鼠标位置和焦点，把按键、点击事件发给对应窗口的客户端。</li>
+          <li><b>绘图</b>：早年客户端让 X 画线、画字、填矩形；现在的程序基本自己画好整张图，X 只负责把图贴上去。</li>
+          <li>靠<b>扩展</b>演进到今天：XRandR（多屏、分辨率旋转）、Composite（窗口离屏合成）、GLX / DRI3 / Present（3D 直接渲染）、XInput2（触控、多指针）、XKB（键盘布局）。</li>
+          <li>设计原则是"<b>只提供机制，不提供策略</b>"：X Server 不画标题栏，也不决定新窗口放在哪，这些交给窗口管理器。</li>
+        </ul>
+        <div class="callout" style="margin:12px 0">
+          <p><b>反直觉的命名：</b>X Server 运行在<b>有屏幕和键盘的那台机器</b>上，因为它"服务"的是显示和输入。用 <code>ssh -X</code> 登录远程服务器跑程序时，远程机器上的程序是客户端，它连回的是你面前这台电脑上的 X Server。</p>
+        </div>
+        <div class="check">查看：<code>echo $DISPLAY</code> <code>xdpyinfo | head</code> <code>ls /tmp/.X11-unix/</code></div>
+      </div>
+    </article>
+
+    <!-- WM -->
+    <article class="concept" id="c-wm">
+      <div class="head">
+        <div class="layer"><i class="sw wm"></i>窗口管理层</div>
+        <h3>窗口管理器</h3>
+        <div class="en">Window Manager · Compositor</div>
+        <p class="one">一个享有特权的 X 客户端，决定每个窗口放在哪、多大、谁在前面、带什么样的边框和标题栏。</p>
+      </div>
+      <div class="body">
+        <ul>
+          <li><b>怎么拿到权力</b>：它向 X Server 申请根窗口的 <code>SubstructureRedirect</code>。此后任何程序想显示、移动、缩放窗口，X Server 都会先把请求转给窗口管理器审批。同一时刻只能有一个窗口管理器。</li>
+          <li><b>职责</b>：窗口摆放、层叠或平铺、焦点切换、画边框和标题栏（叫"窗口装饰"）、最大化最小化、多个虚拟桌面、全局快捷键。</li>
+          <li><b>不装会怎样</b>：程序照样能跑，但窗口全堆在左上角，没有标题栏，拖不动也关不掉。可以用 <code>Xvfb</code> 加一个 <code>xterm</code> 亲手试试。</li>
+        </ul>
+        <p class="sub">三种类型</p>
+        <ul>
+          <li><b>层叠式</b>（像 Windows 那样窗口可以重叠）：Openbox、Fluxbox、xfwm4、IceWM。</li>
+          <li><b>平铺式</b>（自动把屏幕切成不重叠的块）：i3、awesome、dwm、bspwm。</li>
+          <li><b>合成式</b>：自带合成器（compositor）。开启 Composite 扩展后，每个窗口先画到自己的离屏 buffer，再由合成器用 GPU 拼成整屏，于是能做透明、阴影、动画和防撕裂。GNOME 的 Mutter、KDE 的 KWin 都是。不带合成的窗口管理器可以另配独立合成器 <code>picom</code>。</li>
+        </ul>
+        <p>和<b>桌面环境</b>的区别：桌面环境 = 窗口管理器 + 面板/任务栏 + 设置中心 + 文件管理器 + 一整套应用。GNOME 用 Mutter，KDE Plasma 用 KWin，Xfce 用 xfwm4。</p>
+        <div class="check">查看：<code>wmctrl -m</code> <code>echo $XDG_CURRENT_DESKTOP</code></div>
+      </div>
+    </article>
+
+    <!-- Apps -->
+    <article class="concept" id="c-app">
+      <div class="head">
+        <div class="layer"><i class="sw app"></i>应用层</div>
+        <h3>GUI 应用程序</h3>
+        <div class="en">X Client · Wayland Client</div>
+        <p class="one">真正干活的程序：浏览器、终端、编辑器、游戏。它们在 X11 里叫 X 客户端，在 Wayland 里叫 Wayland 客户端。</p>
+      </div>
+      <div class="body">
+        <ul>
+          <li>很少直接讲协议，而是用 <b>GUI 工具包</b>：GTK（GNOME 系）、Qt（KDE 系）、Electron/Chromium、SDL（游戏）、Java Swing、Flutter。工具包底层再调 <code>Xlib</code>/<code>XCB</code>（X11）或 <code>libwayland-client</code>（Wayland）。</li>
+          <li>程序结构是一个<b>事件循环</b>：等待事件（按键、点击、窗口大小改变、需要重绘），更新自身状态，重画自己的窗口内容，再继续等。</li>
+          <li><b>现代程序都自己渲染</b>：用 CPU（Cairo、Skia 软件渲染）或 GPU（经 Mesa 的 OpenGL/Vulkan）把整张窗口画好，再把这张"图"交给显示服务器。</li>
+          <li>同一个 GTK/Qt 程序既能跑在 X11 也能跑在 Wayland，工具包启动时自动选择后端。可以用 <code>GDK_BACKEND=x11</code> 或 <code>QT_QPA_PLATFORM=wayland</code> 强制指定。</li>
+        </ul>
+        <div class="tags"><span>GTK</span><span>Qt</span><span>Electron</span><span>SDL</span><span>Xlib / XCB</span><span>libwayland-client</span></div>
+        <div class="check">查看：<code>xprop</code>（再点一个窗口） <code>xwininfo -root -tree</code> <code>xlsclients</code></div>
+      </div>
+    </article>
+
+    <!-- Virtual display -->
+    <article class="concept" id="c-virtual">
+      <div class="head">
+        <div class="layer"><i class="sw vir"></i>拓展玩法</div>
+        <h3>虚拟显示</h3>
+        <div class="en">Virtual / Headless Display</div>
+        <p class="one">机器上没有显示器，甚至没有显卡，也"假装有一块屏"，让图形程序照常运行。</p>
+      </div>
+      <div class="body">
+        <ul>
+          <li><b>原理</b>：显示服务器只需要一块能写像素的帧缓冲，它并不关心这块缓冲最后有没有送到真的显示器。把帧缓冲放进普通内存，就得到了一块虚拟屏。</li>
+          <li><b>Xvfb</b>（X Virtual FrameBuffer）：一个完整的 X Server，帧缓冲在内存里，CPU 软件渲染，没有任何输出。CI 里跑浏览器测试、无头截图最常用。<code>xvfb-run</code> 一条命令就能包装一个程序。</li>
+          <li><b>Xvnc</b>：X Server 和 VNC 服务端合二为一，TigerVNC/TurboVNC 的 <code>vncserver</code> 启动的就是它。虚拟屏的内容可以被远程看到。</li>
+          <li><b>Xorg + dummy 驱动</b>（<code>xf86-video-dummy</code>）：完整的 Xorg，配一个假显示器驱动，能用 RandR 等全部扩展。</li>
+          <li><b>有 GPU 但没接屏</b>：通过内核参数注入 EDID（<code>drm.edid_firmware</code>），或者插一个"HDMI 欺骗器"（假负载），让显卡以为接了显示器，从而获得完整硬件加速。游戏串流、GPU 云桌面常用。</li>
+          <li><b>Wayland 下</b>：合成器自带 headless 后端，例如 <code>weston --backend=headless</code>、Sway 的 <code>WLR_BACKENDS=headless</code>、<code>mutter --headless --virtual-monitor 1920x1080</code>。</li>
+        </ul>
+        <div class="tags"><span>自动化测试</span><span>服务器远程桌面</span><span>云桌面</span><span>无头截图 / 录屏</span></div>
+        <div class="check">试试：<code>Xvfb :99 -screen 0 1280x720x24 &amp;</code> <code>DISPLAY=:99 xclock</code></div>
+      </div>
+    </article>
+
+    <!-- VNC -->
+    <article class="concept" id="c-vnc">
+      <div class="head">
+        <div class="layer"><i class="sw vnc"></i>拓展玩法</div>
+        <h3>VNC</h3>
+        <div class="en">Virtual Network Computing · RFB</div>
+        <p class="one">把"一块屏幕的像素"通过网络传到另一台电脑上显示，同时把那边的键盘鼠标操作传回来。</p>
+      </div>
+      <div class="body">
+        <ul>
+          <li>底层协议叫 <b>RFB</b>（Remote Framebuffer）。它工作在帧缓冲这一层：不关心窗口和应用，只传送屏幕上发生变化的矩形区域的像素，并用 Tight、ZRLE、JPEG 等编码压缩。所以它非常通用、跨平台，但高分辨率或播放视频时比较吃带宽。</li>
+          <li>两端角色：<b>VNC 服务端</b>（被看的那台）和 <b>VNC 客户端 / Viewer</b>（看的那台，如 TigerVNC Viewer、RealVNC、Remmina、浏览器里的 noVNC）。端口是 <code>5900 + 显示号</code>，<code>:1</code> 就是 5901。</li>
+          <li><b>两种用法</b>（见下方示意图）：共享一块已有的真实桌面（<code>x11vnc</code>、Wayland 下的 <code>wayvnc</code>）；或者新建一个独立的虚拟桌面（<code>Xvnc</code>，每个用户一个，机器上没有显示器也行）。</li>
+          <li>经典 VNC 默认不加密（有的实现支持 VeNCrypt/TLS）。在公网上通常走 SSH 隧道：<code>ssh -L 5901:localhost:5901 user@server</code>，再连本机的 5901。</li>
+          <li>和 <code>ssh -X</code> 的区别：X11 转发传的是 X 协议命令，只转发单个程序的窗口，网络延迟高时很卡；VNC 传的是整屏像素。其他同类方案还有 RDP（xrdp、GNOME 远程桌面）、SPICE（虚拟机）、NoMachine 和 Sunshine（视频流编码）。</li>
+        </ul>
+        <div class="check">试试：<code>vncserver :1 -geometry 1920x1080</code> <code>x11vnc -display :0 -localhost</code></div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- ============ JOURNEY ============ -->
+<section id="journey">
+  <div class="eyebrow">把各层串起来</div>
+  <h2>按下 A 键，到屏幕上出现 "a"</h2>
+  <div class="prose"><p>在一个 X11 + 合成器的桌面上，你在终端里敲下一个字母，数据会穿过整个图形栈一来一回。整个过程通常在 10 到 50 毫秒之间完成。</p></div>
+  <ol class="journey">
+    <li><span class="who hw">键盘</span><p>按下 A 键，键盘通过 USB 发出一个 HID 报告，里面是这个键的扫描码。</p></li>
+    <li><span class="who k">内核</span><p>USB HID 驱动解析报告，交给 input 子系统，<code>/dev/input/event3</code> 上出现一条 <code>KEY_A 按下</code> 事件。</p></li>
+    <li><span class="who drv">libinput</span><p>Xorg 加载的 libinput 输入驱动读到这条事件，转换成 X 的 KeyPress。XKB 根据当前键盘布局把它翻译成字符 "a"。</p></li>
+    <li><span class="who x">X Server</span><p>查窗口树和输入焦点（焦点是窗口管理器之前设置好的），把 KeyPress 事件写进终端程序的 socket。</p></li>
+    <li><span class="who app">终端程序</span><p>事件循环被唤醒，把 "a" 追加进缓冲区，并重新渲染受影响的那一行（用 Cairo 或 OpenGL）。</p></li>
+    <li><span class="who app">终端程序</span><p>把画好的新窗口内容交给 X Server（通过共享内存或 DRI3/Present 传递 buffer）。</p></li>
+    <li><span class="who wm">合成器</span><p>X Server 发出 Damage 通知，告诉合成器这个窗口变了。合成器用 OpenGL（经 Mesa 驱动 GPU）把所有窗口重新拼成整屏画面。</p></li>
+    <li><span class="who k">DRM/KMS</span><p>整屏画面画进一块新的 buffer，通过 KMS 请求"下一次垂直同步时切换到这块 buffer"（page flip），避免画面撕裂。</p></li>
+    <li><span class="who hw">GPU</span><p>显示引擎在下一个刷新周期读取新的帧缓冲，经 HDMI/DP 线缆逐行发出。</p></li>
+    <li><span class="who hw">显示器</span><p>点亮对应像素，你看到了 "a"。</p></li>
+  </ol>
+</section>
+
+<!-- ============ REMOTE ============ -->
+<section id="remote">
+  <div class="eyebrow">虚拟显示 + VNC</div>
+  <h2>没有屏幕的机器，怎样远程看到桌面</h2>
+  <div class="prose">
+    <p>VNC 只需要拿到"一块帧缓冲"的像素。这块帧缓冲可以来自你正在使用的真实桌面，也可以是一块凭空创建的虚拟屏，于是有了两种常见搭法。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fig-scroll">
+    <svg viewBox="0 0 960 420" role="img" aria-label="两种 VNC 搭法。A：应用连 Xorg :0，Xorg 输出到显卡显示器，x11vnc 抓取 Xorg 画面经 RFB 端口 5900 发给远端客户端。B：应用连 Xvnc :1，Xvnc 内含 X server 和内存帧缓冲的 VNC server，经 RFB 端口 5901 发给远端客户端，不需要显卡和显示器">
+      <defs>
+        <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+        <marker id="a2c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-acc" d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+      <text class="title" x="40" y="34">A · 共享现有桌面</text>
+      <text class="m" x="196" y="34">x11vnc</text>
+      <text class="title" x="520" y="34">B · 独立虚拟桌面</text>
+      <text class="m" x="676" y="34">Xvnc / vncserver</text>
+      <line class="divider" x1="480" y1="16" x2="480" y2="410"/>
+
+      <!-- A -->
+      <rect class="b-app" x="40" y="60" width="220" height="56" rx="6"/>
+      <text class="t" x="150" y="84" text-anchor="middle">应用 + 窗口管理器</text>
+      <text class="s" x="150" y="104" text-anchor="middle">你平时用的那套桌面</text>
+
+      <rect class="b-x" x="40" y="160" width="220" height="56" rx="6"/>
+      <text class="t" x="150" y="184" text-anchor="middle">Xorg</text>
+      <text class="m" x="150" y="204" text-anchor="middle">DISPLAY=:0</text>
+
+      <rect class="b-hw" x="40" y="260" width="220" height="56" rx="6"/>
+      <text class="t" x="150" y="284" text-anchor="middle">显卡 → 显示器</text>
+      <text class="s" x="150" y="304" text-anchor="middle">本地屏幕上同步可见</text>
+
+      <rect class="b-vnc" x="310" y="160" width="150" height="56" rx="6"/>
+      <text class="t" x="385" y="184" text-anchor="middle">x11vnc</text>
+      <text class="s" x="385" y="204" text-anchor="middle">VNC 服务端</text>
+
+      <rect class="b-app" x="310" y="340" width="150" height="56" rx="6"/>
+      <text class="t" x="385" y="364" text-anchor="middle">VNC 客户端</text>
+      <text class="s" x="385" y="384" text-anchor="middle">另一台电脑</text>
+
+      <line class="ar" x1="150" y1="119" x2="150" y2="157" marker-start="url(#a2)" marker-end="url(#a2)"/>
+      <line class="ar" x1="150" y1="219" x2="150" y2="257" marker-end="url(#a2)"/>
+      <line class="ar" x1="263" y1="188" x2="307" y2="188" marker-start="url(#a2)" marker-end="url(#a2)"/>
+      <text class="lbl" x="285" y="146" text-anchor="middle">抓屏 ⇄ 注入键鼠</text>
+      <line class="ar acc" x1="385" y1="219" x2="385" y2="337" marker-start="url(#a2c)" marker-end="url(#a2c)"/>
+      <text class="lbl" x="374" y="270" text-anchor="end">RFB 协议</text>
+      <text class="m" x="374" y="288" text-anchor="end">端口 5900</text>
+
+      <!-- B -->
+      <rect class="b-app" x="520" y="60" width="220" height="56" rx="6"/>
+      <text class="t" x="630" y="84" text-anchor="middle">应用 + 窗口管理器</text>
+      <text class="s" x="630" y="104" text-anchor="middle">为远程用户单独启动</text>
+
+      <rect class="b-x" x="520" y="160" width="220" height="156" rx="6"/>
+      <text class="t" x="536" y="184">Xvnc</text>
+      <text class="m" x="724" y="184" text-anchor="end">DISPLAY=:1</text>
+      <rect class="b-chip" x="536" y="198" width="188" height="48" rx="4"/>
+      <text class="chip-t" x="630" y="218" text-anchor="middle">X Server 部分</text>
+      <text class="s" x="630" y="236" text-anchor="middle">管窗口、分发事件</text>
+      <rect class="b-vnc" x="536" y="254" width="188" height="48" rx="4"/>
+      <text class="chip-t" x="630" y="274" text-anchor="middle">VNC 服务端部分</text>
+      <text class="s" x="630" y="292" text-anchor="middle">帧缓冲就在内存里</text>
+
+      <rect class="b-vir" x="520" y="340" width="220" height="56" rx="6"/>
+      <text class="s" x="630" y="364" text-anchor="middle">不需要显卡</text>
+      <text class="s" x="630" y="382" text-anchor="middle">也不需要显示器</text>
+
+      <rect class="b-app" x="790" y="340" width="150" height="56" rx="6"/>
+      <text class="t" x="865" y="364" text-anchor="middle">VNC 客户端</text>
+      <text class="s" x="865" y="384" text-anchor="middle">另一台电脑</text>
+
+      <line class="ar" x1="630" y1="119" x2="630" y2="157" marker-start="url(#a2)" marker-end="url(#a2)"/>
+      <path class="ar acc" d="M727,278 H865 V337" marker-start="url(#a2c)" marker-end="url(#a2c)"/>
+      <text class="lbl" x="760" y="266">RFB 协议</text>
+      <text class="m" x="840" y="266">5901</text>
+    </svg>
+    </div>
+    <figcaption>
+      <span>A 适合远程协助、在别处操作自己的电脑：远端看到的就是本地屏幕。B 适合服务器：每个远程用户一个互不干扰的桌面，机器可以完全没有显示器。</span>
+    </figcaption>
+  </figure>
+
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>方案</th><th>它是什么</th><th>GPU 加速</th><th>需要物理屏</th><th>典型命令</th><th>常见场景</th></tr>
+      </thead>
+      <tbody>
+        <tr><th>Xvfb</th><td>内存里的 X Server，没有任何输出</td><td class="no">否</td><td class="no">否</td><td><code>xvfb-run -a cmd</code></td><td>自动化测试、无头截图</td></tr>
+        <tr><th>Xvnc</th><td>X Server 与 VNC 服务端合体</td><td class="no">否（默认）</td><td class="no">否</td><td><code>vncserver :1</code></td><td>服务器多用户远程桌面</td></tr>
+        <tr><th>x11vnc</th><td>抓取一个已存在的 X 显示并通过 VNC 发出</td><td>取决于被抓的桌面</td><td>一般有，也可搭配 Xvfb</td><td><code>x11vnc -display :0</code></td><td>远程协助、操作自己的电脑</td></tr>
+        <tr><th>Xorg + dummy</th><td>完整 Xorg 配假显示器驱动</td><td class="no">否</td><td class="no">否</td><td><code>Xorg -config dummy.conf</code></td><td>需要完整 Xorg 扩展的无头环境</td></tr>
+        <tr><th>EDID 注入 / HDMI 欺骗器</th><td>让真实 GPU 以为接了显示器</td><td class="yes">是</td><td class="no">否</td><td><code>drm.edid_firmware=…</code></td><td>游戏串流、GPU 云桌面</td></tr>
+        <tr><th>wayvnc / GNOME 远程桌面</th><td>Wayland 合成器上的 VNC / RDP 服务</td><td class="yes">是</td><td>可以没有（headless）</td><td><code>wayvnc 0.0.0.0</code></td><td>Wayland 桌面的远程访问</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ WAYLAND ============ -->
+<section id="wayland">
+  <div class="eyebrow">另一种架构</div>
+  <h2>Wayland：去掉中间人</h2>
+  <div class="prose">
+    <p>Wayland 是 2008 年由 X 开发者 Kristian Høgsberg 发起的一套<b>新的显示协议</b>（加上参考库 libwayland），不是 Xorg 的新版本，也不是某一个具体程序。它的核心想法是：既然现代应用都自己画好整张窗口，合成器又总要把所有窗口重新拼一遍，那 X Server 夹在中间就只剩转手传话了，不如直接拿掉。</p>
+    <p>于是 X11 里的三个角色——显示服务器、窗口管理器、合成器——在 Wayland 里合并成了一个进程，统称 <b>Wayland 合成器</b>（compositor）。</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fig-scroll">
+    <svg viewBox="0 0 960 460" role="img" aria-label="X11 与 Wayland 数据流对比。X11 有六步：内核到 X Server，X Server 到应用，应用回 X Server，X Server 通知合成器，合成器交回 X Server，X Server 到内核。Wayland 只有四步：内核到合成器，合成器到应用，应用交 buffer 给合成器，合成器到内核；XWayland 作为兼容层连接合成器">
+      <defs>
+        <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+      <text class="title" x="40" y="34">X11（带合成器）</text>
+      <text class="title" x="520" y="34">Wayland</text>
+      <line class="divider" x1="480" y1="16" x2="480" y2="450"/>
+
+      <!-- X11 -->
+      <rect class="b-app" x="40" y="60" width="170" height="60" rx="6"/>
+      <text class="t" x="125" y="86" text-anchor="middle">应用</text>
+      <text class="s" x="125" y="106" text-anchor="middle">X 客户端</text>
+      <rect class="b-wm" x="270" y="60" width="170" height="60" rx="6"/>
+      <text class="t" x="355" y="86" text-anchor="middle">合成器 / 窗口管理器</text>
+      <text class="s" x="355" y="106" text-anchor="middle">picom · Mutter · KWin</text>
+      <rect class="b-x" x="40" y="230" width="400" height="60" rx="6"/>
+      <text class="t" x="240" y="257" text-anchor="middle">X Server（Xorg）</text>
+      <text class="s" x="240" y="277" text-anchor="middle">所有消息都要从这里经过</text>
+      <rect class="b-k" x="40" y="380" width="400" height="56" rx="6"/>
+      <text class="t" x="240" y="406" text-anchor="middle">内核</text>
+      <text class="s" x="240" y="425" text-anchor="middle">evdev（输入） · DRM/KMS（输出）</text>
+
+      <line class="ar" x1="90" y1="378" x2="90" y2="293" marker-end="url(#a3)"/>
+      <line class="ar" x1="115" y1="228" x2="115" y2="123" marker-end="url(#a3)"/>
+      <line class="ar" x1="170" y1="123" x2="170" y2="227" marker-end="url(#a3)"/>
+      <line class="ar" x1="310" y1="228" x2="310" y2="123" marker-end="url(#a3)"/>
+      <line class="ar" x1="400" y1="123" x2="400" y2="227" marker-end="url(#a3)"/>
+      <line class="ar" x1="390" y1="292" x2="390" y2="377" marker-end="url(#a3)"/>
+      <circle class="num-c" cx="90" cy="335" r="11"/><text class="num-t" x="90" y="339" text-anchor="middle">1</text>
+      <circle class="num-c" cx="115" cy="175" r="11"/><text class="num-t" x="115" y="179" text-anchor="middle">2</text>
+      <circle class="num-c" cx="170" cy="175" r="11"/><text class="num-t" x="170" y="179" text-anchor="middle">3</text>
+      <circle class="num-c" cx="310" cy="175" r="11"/><text class="num-t" x="310" y="179" text-anchor="middle">4</text>
+      <circle class="num-c" cx="400" cy="175" r="11"/><text class="num-t" x="400" y="179" text-anchor="middle">5</text>
+      <circle class="num-c" cx="390" cy="335" r="11"/><text class="num-t" x="390" y="339" text-anchor="middle">6</text>
+
+      <!-- Wayland -->
+      <rect class="b-app" x="590" y="60" width="210" height="60" rx="6"/>
+      <text class="t" x="695" y="86" text-anchor="middle">应用</text>
+      <text class="s" x="695" y="106" text-anchor="middle">Wayland 客户端 · 自己渲染</text>
+      <rect class="b-x" x="830" y="60" width="110" height="60" rx="6"/>
+      <text class="t" x="885" y="86" text-anchor="middle">XWayland</text>
+      <text class="s" x="885" y="106" text-anchor="middle">跑老 X 程序</text>
+
+      <rect class="b-wm" x="520" y="200" width="420" height="105" rx="6"/>
+      <text class="t" x="730" y="224" text-anchor="middle">Wayland 合成器</text>
+      <rect class="b-x" x="536" y="240" width="124" height="48" rx="4"/>
+      <text class="chip-t" x="598" y="269" text-anchor="middle">显示服务器</text>
+      <rect class="b-chip" x="670" y="240" width="124" height="48" rx="4"/>
+      <text class="chip-t" x="732" y="269" text-anchor="middle">窗口管理</text>
+      <rect class="b-chip" x="804" y="240" width="120" height="48" rx="4"/>
+      <text class="chip-t" x="864" y="269" text-anchor="middle">合成</text>
+
+      <rect class="b-k" x="520" y="380" width="420" height="56" rx="6"/>
+      <text class="t" x="730" y="406" text-anchor="middle">内核</text>
+      <text class="s" x="730" y="425" text-anchor="middle">evdev（输入） · DRM/KMS（输出）</text>
+
+      <line class="ar" x1="560" y1="378" x2="560" y2="308" marker-end="url(#a3)"/>
+      <line class="ar" x1="640" y1="198" x2="640" y2="123" marker-end="url(#a3)"/>
+      <line class="ar" x1="750" y1="123" x2="750" y2="197" marker-end="url(#a3)"/>
+      <line class="ar" x1="900" y1="307" x2="900" y2="377" marker-end="url(#a3)"/>
+      <line class="ar" x1="885" y1="123" x2="885" y2="197" stroke-dasharray="4 4" marker-start="url(#a3)" marker-end="url(#a3)"/>
+      <circle class="num-c" cx="560" cy="343" r="11"/><text class="num-t" x="560" y="347" text-anchor="middle">1</text>
+      <circle class="num-c" cx="640" cy="160" r="11"/><text class="num-t" x="640" y="164" text-anchor="middle">2</text>
+      <circle class="num-c" cx="750" cy="160" r="11"/><text class="num-t" x="750" y="164" text-anchor="middle">3</text>
+      <circle class="num-c" cx="900" cy="343" r="11"/><text class="num-t" x="900" y="347" text-anchor="middle">4</text>
+    </svg>
+    </div>
+    <figcaption><span>同一件事（一次输入 + 一次画面更新）：X11 绕了六步，Wayland 只要四步。</span></figcaption>
+  </figure>
+
+  <div class="two">
+    <div class="panel">
+      <h3>X11 的六步</h3>
+      <ol>
+        <li>内核把输入事件交给 X Server。</li>
+        <li>X Server 判断落在哪个窗口，转发给应用。但窗口可能已被合成器缩放或做了动画，X 并不知道它在屏幕上的真实样子，只能按自己窗口树里的位置去猜。</li>
+        <li>应用画好新内容，交回 X Server。</li>
+        <li>X Server 发 Damage 通知给合成器："这个窗口变了"。</li>
+        <li>合成器重新拼出整屏，再交回 X Server。</li>
+        <li>X Server 通过 KMS 送去显示。</li>
+      </ol>
+    </div>
+    <div class="panel">
+      <h3>Wayland 的四步</h3>
+      <ol>
+        <li>内核把输入事件直接交给合成器。</li>
+        <li>合成器清楚每个窗口在屏幕上的真实位置和变换，准确地把事件发给对应的应用。</li>
+        <li>应用自己画好一块 buffer（CPU 用 <code>wl_shm</code> 共享内存，GPU 用 <code>linux-dmabuf</code>），然后 commit 给合成器。</li>
+        <li>合成器拼好整屏，通过 KMS 送去显示，每一帧都是完整的，设计上就不会撕裂。</li>
+      </ol>
+    </div>
+  </div>
+
+  <h3 style="margin-top:36px">Wayland 和 X11 最关键的几点不同</h3>
+  <div class="points">
+    <div class="point">
+      <h3>没有服务器端绘图</h3>
+      <p>协议里没有"画线、画字"这类请求，应用必须自己渲染整张窗口。这把 X11 里早已没人用的大量历史包袱一并扔掉了。</p>
+    </div>
+    <div class="point">
+      <h3>换窗口管理器 = 换合成器</h3>
+      <p>窗口策略在合成器内部，不再有独立的窗口管理器进程。想要平铺就用 Sway、Hyprland、niri，想要传统桌面就用 GNOME 的 Mutter 或 KDE 的 KWin。很多合成器基于 wlroots、Smithay 等库构建，参考实现是 Weston。</p>
+    </div>
+    <div class="point">
+      <h3>应用之间互相隔离</h3>
+      <p>X11 里任何程序都能读取整个屏幕、监听全局按键、向别的窗口注入输入，等于没有隔离。Wayland 客户端只能看到自己的窗口。截图、录屏、远程控制要通过 xdg-desktop-portal + PipeWire 申请，并由用户授权。</p>
+    </div>
+    <div class="point">
+      <h3>XWayland 保兼容</h3>
+      <p>XWayland 是跑在 Wayland 合成器里的一个 X Server。老的 X11 程序连上它照常工作，它再把这些窗口当作普通 Wayland 窗口交给合成器。用 <code>xlsclients</code> 列出的就是走 XWayland 的程序。</p>
+    </div>
+    <div class="point">
+      <h3>协议本身不管网络</h3>
+      <p>没有 <code>ssh -X</code> 那样的网络透明。远程运行单个程序用 <code>waypipe</code>，远程桌面用 RDP 或 VNC（gnome-remote-desktop、KDE 的 KRdp、wlroots 系的 wayvnc）。</p>
+    </div>
+    <div class="point">
+      <h3>现代显示特性更顺</h3>
+      <p>多块屏用不同缩放比例（混合 DPI）、不同刷新率、分数缩放、可变刷新率、HDR，在 Wayland 上实现得更自然；X11 只有一个全局坐标系和一套全局设置。</p>
+    </div>
+  </div>
+
+  <h3 style="margin-top:36px">同一个概念，在两边对应什么</h3>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>概念</th><th>X11</th><th>Wayland</th></tr></thead>
+      <tbody>
+        <tr><th>显示服务器</th><td>Xorg（独立进程）</td><td>合成器本身</td></tr>
+        <tr><th>窗口管理器</th><td>独立进程，可随意替换（i3、Openbox）</td><td>合成器内部（Sway、Hyprland、Mutter、KWin）</td></tr>
+        <tr><th>合成器</th><td>可选：WM 自带或另装 picom</td><td>必然存在，就是它</td></tr>
+        <tr><th>协议</th><td>X11 核心 + 几十个扩展</td><td>Wayland 核心 + wayland-protocols（xdg-shell、linux-dmabuf……）</td></tr>
+        <tr><th>客户端库</th><td><code>Xlib</code> / <code>XCB</code></td><td><code>libwayland-client</code></td></tr>
+        <tr><th>连接方式</th><td><code>DISPLAY=:0</code> → <code>/tmp/.X11-unix/X0</code></td><td><code>WAYLAND_DISPLAY=wayland-0</code> → <code>$XDG_RUNTIME_DIR/wayland-0</code></td></tr>
+        <tr><th>谁渲染窗口</th><td>可以让 X 画，也可以客户端自己画</td><td>只有客户端自己画</td></tr>
+        <tr><th>标题栏谁画</th><td>窗口管理器（服务端装饰）</td><td>应用自己（CSD），或合成器支持 xdg-decoration 时由它画</td></tr>
+        <tr><th>截图 / 录屏</th><td>任何程序都能直接读屏</td><td>经 portal + PipeWire，用户授权</td></tr>
+        <tr><th>远程</th><td><code>ssh -X</code>、x11vnc、Xvnc</td><td>waypipe、wayvnc、RDP</td></tr>
+        <tr><th>虚拟显示</th><td>Xvfb、Xvnc、dummy 驱动</td><td>合成器的 headless 后端</td></tr>
+        <tr><th>自动化</th><td><code>xdotool</code>、<code>wmctrl</code></td><td><code>ydotool</code>、合成器自己的 IPC（<code>swaymsg</code>、<code>hyprctl</code>）</td></tr>
+        <tr><th>老程序</th><td>原生支持</td><td>通过 XWayland</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <p><b>现状（截至 2026 年）：</b>Fedora、Ubuntu 等主流发行版的 GNOME 和 KDE 桌面默认早已是 Wayland 会话。GNOME 从 49 版开始默认不再提供 X11 会话，KDE 也宣布 Plasma 6.8 起只支持 Wayland。NVIDIA 专有驱动在 555 版加入显式同步之后，Wayland 体验大幅改善。Xorg 本身基本只剩维护性更新，但 Xvfb、Xvnc 和 XWayland 仍会长期存在，所以 X11 的概念还值得懂。</p>
+  </div>
+</section>
+
+<!-- ============ COMMANDS ============ -->
+<section id="commands">
+  <div class="eyebrow">动手查看</div>
+  <h2>在自己的机器上验证这些概念</h2>
+<pre class="code"><span class="c"># 我现在是 X11 还是 Wayland？</span>
+echo $XDG_SESSION_TYPE                 <span class="c"># x11 / wayland / tty</span>
+echo "$DISPLAY | $WAYLAND_DISPLAY"     <span class="c"># 例如 ":0 | wayland-0"</span>
+
+<span class="c"># 显卡和驱动</span>
+lspci -k | grep -EA3 'VGA|3D|Display'  <span class="c"># 显卡型号 + 正在用的内核驱动</span>
+ls -l /dev/dri/                        <span class="c"># card0 = 显示控制，renderD128 = 渲染</span>
+glxinfo -B                             <span class="c"># OpenGL 渲染器和 Mesa 版本（mesa-utils 包）</span>
+vulkaninfo --summary
+
+<span class="c"># 显示器</span>
+xrandr                                 <span class="c"># X11 下列出输出口、分辨率、刷新率</span>
+for f in /sys/class/drm/card*-*/status; do echo "$f: $(cat $f)"; done
+
+<span class="c"># 窗口管理器 / 桌面环境</span>
+wmctrl -m
+echo $XDG_CURRENT_DESKTOP
+
+<span class="c"># 哪些程序走 XWayland（Wayland 会话里）</span>
+xlsclients
+
+<span class="c"># 虚拟显示：在内存里开一块 1280x720 的屏，跑一个时钟</span>
+Xvfb :99 -screen 0 1280x720x24 &amp;
+DISPLAY=:99 xclock &amp;
+DISPLAY=:99 import -window root shot.png   <span class="c"># 截下虚拟屏（ImageMagick）</span>
+xvfb-run -a python run_selenium_tests.py   <span class="c"># 一条命令包装</span>
+
+<span class="c"># VNC</span>
+vncserver :1 -geometry 1920x1080       <span class="c"># TigerVNC：新建独立虚拟桌面，端口 5901</span>
+x11vnc -display :0 -localhost          <span class="c"># 共享当前真实桌面，只监听本机</span>
+ssh -L 5901:localhost:5901 user@server <span class="c"># 在自己电脑上开隧道，然后连 localhost:5901</span></pre>
+</section>
+
+<!-- ============ MYTHS ============ -->
+<section id="myths">
+  <div class="eyebrow">常见误区</div>
+  <h2>容易搞混的五件事</h2>
+  <dl class="myths">
+    <div><dt>X Server 跑在远程服务器上</dt><dd>X Server 跑在有屏幕和键盘的那台机器上。远程跑的程序是 X 客户端，它连回你本地的 X Server。</dd></div>
+    <div><dt>显卡驱动就是一个内核模块</dt><dd>完整的驱动分三块：内核里的 DRM/KMS 驱动，用户态的 Mesa（或 NVIDIA 专有库），再加 Xorg 的 DDX 模块（通常是通用的 modesetting）。</dd></div>
+    <div><dt>服务器没有显示器就跑不了图形程序</dt><dd>用 Xvfb、Xvnc 或合成器的 headless 后端开一块虚拟屏即可，CI 里的浏览器测试天天这么跑。</dd></div>
+    <div><dt>VNC 和 ssh -X 是一回事</dt><dd>VNC 传整屏像素，与应用无关；<code>ssh -X</code> 传的是 X 协议命令，只转发单个程序的窗口，而且在 Wayland 下需要 XWayland 或改用 waypipe。</dd></div>
+    <div><dt>Wayland 是 Xorg 的新版本</dt><dd>它是一套全新的协议，和 X11 不兼容。接替 Xorg 位置的，是 Mutter、KWin、Sway 这些各家自己实现的合成器；老程序靠 XWayland 兼容。</dd></div>
+  </dl>
+</section>
+
+<footer>示意图为概念简化，省略了 D-Bus、会话管理（systemd-logind）、音频等与显示无关的部分。</footer>
+
+</div>
